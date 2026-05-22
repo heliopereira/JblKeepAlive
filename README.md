@@ -21,7 +21,7 @@ Diferente de soluções comuns que exigem tocar música em volume baixo, o **JBL
 
 ## 🛠 Tech Stack
 
-* **.NET 8.0** (C#)
+* **.NET 10.0** (C#)
 * **NAudio**: Manipulação de áudio de baixo nível e Core Audio API.
 * **Windows Forms**: Interface leve para System Tray.
 * **Microsoft.Extensions.Hosting**: Gerenciamento de ciclo de vida do Worker Service.

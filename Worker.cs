@@ -10,7 +10,9 @@ public class Worker : BackgroundService
     private readonly MMDeviceEnumerator _enumerator;
     private readonly AudioNotificationClient _notificationClient;
     private readonly JblStatusService _statusService;
-    private WaveOutEvent? _waveOut;
+    private readonly object _lock = new();
+    private IWavePlayer? _waveOut;
+    private string? _jblDeviceId;
     private const string DeviceNameFilter = "JBL Go 4";
 
     public Worker(ILogger<Worker> logger, JblStatusService statusService)
@@ -18,7 +20,7 @@ public class Worker : BackgroundService
         _logger = logger;
         _enumerator = new MMDeviceEnumerator();
 
-        // Inicializa o cliente de notificaÁ„o passando um callback
+        // Inicializa o cliente de notifica√ß√£o passando um callback
         _notificationClient = new AudioNotificationClient(() => UpdateHeartbeatState(), _logger);
 
         // Registra o callback no sistema operacional
@@ -26,43 +28,60 @@ public class Worker : BackgroundService
         _statusService = statusService;
     }
 
-    protected override Task ExecuteAsync(CancellationToken stoppingToken)
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        _logger.LogInformation("ServiÁo Reativo JBL Keep-Alive iniciado.");
+        _logger.LogInformation("Servi√ßo Reativo JBL Keep-Alive iniciado.");
 
-        // Faz a verificaÁ„o inicial para saber se a JBL j· est· conectada no boot
-        UpdateHeartbeatState();
-
-        // O Worker agora apenas aguarda o cancelamento (StopService)
-        return Task.CompletedTask;
+        // Fallback: verifica√ß√£o peri√≥dica a cada 5s para capturar conex√µes que o evento do Windows n√£o disparou
+        while (!stoppingToken.IsCancellationRequested)
+        {
+            UpdateHeartbeatState();
+            await Task.Delay(5000, stoppingToken);
+        }
     }
 
     private void UpdateHeartbeatState()
     {
-        bool isJblConnected = CheckIfJblIsActive();
-        _statusService.IsConnected = isJblConnected; // Notifica o sistema
+        lock (_lock)
+        {
+            var jblState = GetJblDeviceState();
 
-        if (isJblConnected && _waveOut == null)
-        {
-            StartHeartbeat();
-        }
-        else if (!isJblConnected && _waveOut != null)
-        {
-            StopHeartbeat();
+            if (jblState == DeviceState.Active && _waveOut == null)
+            {
+                _statusService.IsConnected = true;
+                StartHeartbeat();
+            }
+            else if (jblState is DeviceState.NotPresent or DeviceState.Disabled or null)
+            {
+                _statusService.IsConnected = false;
+                StopHeartbeat();
+            }
         }
     }
 
-    private bool CheckIfJblIsActive()
+    private DeviceState? GetJblDeviceState()
     {
-        var endpoints = _enumerator.EnumerateAudioEndPoints(DataFlow.Render, DeviceState.Active);
-        return endpoints.Any(e => e.FriendlyName.Contains(DeviceNameFilter, StringComparison.OrdinalIgnoreCase));
+        var endpoints = _enumerator.EnumerateAudioEndPoints(DataFlow.Render, DeviceState.Active | DeviceState.Unplugged | DeviceState.Disabled);
+        var device = endpoints.FirstOrDefault(e => e.FriendlyName.Contains(DeviceNameFilter, StringComparison.OrdinalIgnoreCase));
+        _jblDeviceId = device?.ID;
+        return device?.State;
     }
 
     private void StartHeartbeat()
     {
-        _logger.LogInformation("Evento Detectado: JBL est· Ativa. Iniciando sinal.");
+        _logger.LogInformation("Evento Detectado: JBL est√° Ativa. Iniciando sinal.");
         var signal = new SignalGenerator() { Gain = 0.005, Frequency = 20, Type = SignalGeneratorType.Sin };
-        _waveOut = new WaveOutEvent();
+
+        if (_jblDeviceId != null)
+        {
+            var device = _enumerator.GetDevice(_jblDeviceId);
+            _waveOut = new WasapiOut(device, AudioClientShareMode.Shared, false, 100);
+        }
+        else
+        {
+            _waveOut = new WaveOutEvent();
+        }
+
         _waveOut.Init(signal);
         _waveOut.Play();
     }
@@ -81,6 +100,7 @@ public class Worker : BackgroundService
     public override void Dispose()
     {
         _enumerator.UnregisterEndpointNotificationCallback(_notificationClient);
+        StopHeartbeat();
         base.Dispose();
     }
 }
