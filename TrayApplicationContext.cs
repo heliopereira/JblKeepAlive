@@ -1,5 +1,6 @@
 ﻿using System.Reflection; // Necessário para acessar os recursos embutidos
 using Application = System.Windows.Forms.Application;
+using Microsoft.Extensions.Options;
 
 namespace JblKeepAlive;
 
@@ -7,14 +8,16 @@ public class TrayApplicationContext : ApplicationContext
 {
     private readonly NotifyIcon _trayIcon;
     private readonly JblStatusService _statusService;
+    private readonly AppSettings _settings;
 
     // Mantemos os ícones em memória para evitar recarregá-los constantemente
     private readonly Icon _iconOn;
     private readonly Icon _iconOff;
 
-    public TrayApplicationContext(IHost host, JblStatusService statusService)
+    public TrayApplicationContext(JblStatusService statusService, IOptions<AppSettings> settings)
     {
         _statusService = statusService;
+        _settings = settings.Value;
 
         // 1. Carrega os ícones embutidos no início da aplicação
         // ATENÇÃO: O nome do recurso deve ser "NomeDoSeuNamespace.Pasta.NomeDoArquivo.extensao"
@@ -25,7 +28,7 @@ public class TrayApplicationContext : ApplicationContext
         {
             Icon = _iconOff, // Começa com o ícone de "desconectado"
             Visible = true,
-            Text = "JBL Sentinel: Inicializando..."
+            Text = $"{_settings.UI.AppName}: Inicializando..."
         };
 
         // 2. O evento agora alterna entre os ícones reais
@@ -33,17 +36,27 @@ public class TrayApplicationContext : ApplicationContext
             // Atualiza o ícone na thread da UI
             _trayIcon.Icon = connected ? _iconOn : _iconOff;
 
-            _trayIcon.Text = connected ? "JBL Go 4: Ativa e Protegida" : "JBL Go 4: Não detectada";
+            var message = connected 
+                ? string.Format(_settings.UI.ConnectedMessage, _settings.JblDevice.DisplayName)
+                : string.Format(_settings.UI.DisconnectedMessage, _settings.JblDevice.DisplayName);
+            _trayIcon.Text = message;
 
             if (connected)
             {
                 // Opcional: Se quiser remover o balão para ficar menos intrusivo, comente a linha abaixo
-                _trayIcon.ShowBalloonTip(3000, "JBL Sentinel", "Caixa conectada. O heartbeat de áudio está ativo.", ToolTipIcon.Info);
+                _trayIcon.ShowBalloonTip(
+                    3000, 
+                    string.Format(_settings.UI.BalloonTipTitle, _settings.JblDevice.DisplayName), 
+                    _settings.UI.BalloonTipMessage, 
+                    ToolTipIcon.Info);
             }
         };
 
         _trayIcon.ContextMenuStrip = CreateMenu();
+    }
 
+    public void StartWorker(IHost host)
+    {
         // Inicia o Worker Service em background
         host.StartAsync();
     }
@@ -65,8 +78,7 @@ public class TrayApplicationContext : ApplicationContext
     private ContextMenuStrip CreateMenu()
     {
         var menu = new ContextMenuStrip();
-        // Um truque para forçar a atualização visual se necessário
-        menu.Items.Add("Forçar Atualização de Status", null, (s, e) => _statusService.IsConnected = _statusService.IsConnected);
+        menu.Items.Add("Forçar Atualização de Status", null, (s, e) => _statusService.RequestRefresh());
         menu.Items.Add("-");
         menu.Items.Add("Sair do Sentinel", null, (s, e) => ExitApplication());
         return menu;

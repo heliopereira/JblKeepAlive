@@ -1,6 +1,4 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.Text;
 
 namespace JblKeepAlive
 {
@@ -8,6 +6,9 @@ namespace JblKeepAlive
     {
         public event Action<bool>? OnStatusChanged;
         private bool _isConnected;
+
+        public event Action? OnRequestRefresh;
+        public void RequestRefresh() => OnRequestRefresh?.Invoke();
 
         public bool IsConnected
         {

@@ -15,7 +15,7 @@ public class AudioNotificationClient : IMMNotificationClient
     // Este é o evento que nos interessa: mudança de estado (Active, Disabled, NotPresent, Unplugged)
     public void OnDeviceStateChanged(string deviceId, DeviceState newState)
     {
-        _logger.LogInformation($"Dispositivo {deviceId} mudou de estado para: {newState}");
+        _logger.LogDebug("Dispositivo {DeviceId} mudou de estado para: {NewState}", deviceId, newState);
         _onChanged?.Invoke();
     }
 

@@ -1,14 +1,33 @@
 using JblKeepAlive;
-using static System.Net.Mime.MediaTypeNames;
 using Application = System.Windows.Forms.Application;
+using Microsoft.Extensions.Options;
 
 var builder = Host.CreateApplicationBuilder(args);
-builder.Services.AddSingleton<JblStatusService>(); // Servi�o para compartilhar o status
-builder.Services.AddHostedService<Worker>(); // Seu Worker reativo que criamos antes
+
+// Configuração
+builder.Services.Configure<AppSettings>(builder.Configuration);
+
+// Serviços
+builder.Services.AddSingleton<JblStatusService>();
+builder.Services.AddHostedService<Worker>();
 
 using var host = builder.Build();
 
+// Proteção contra múltiplas instâncias
+var mutex = new Mutex(true, "JblKeepAlive-Sentinel", out bool isNewInstance);
+if (!isNewInstance)
+{
+    var logger = host.Services.GetService<ILogger<Program>>();
+    logger?.LogInformation("Outra instância do JBL Keep-Alive já está em execução. Encerrando.");
+    return;
+}
+
 ApplicationConfiguration.Initialize();
-// Rodamos a aplica��o atrav�s do contexto do Tray
 var statusService = host.Services.GetRequiredService<JblStatusService>();
-Application.Run(new TrayApplicationContext(host, statusService));
+var trayContext = new TrayApplicationContext(statusService, host.Services.GetRequiredService<IOptions<AppSettings>>());
+
+// Inicia o Worker ANTES de entrar no loop da UI
+trayContext.StartWorker(host);
+
+// Agora entra no loop da UI
+Application.Run(trayContext);

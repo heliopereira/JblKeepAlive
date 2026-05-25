@@ -1,77 +1,132 @@
 # 🔊 JBL Keep-Alive Sentinel
 
-**O sentinela definitivo para sua JBL Go 4 no Windows.**
+**O sentinela definitivo para caixas de som Bluetooth no Windows.**
 
-Você já sentiu a frustração de estar em um momento de foco absoluto (*Deep Work*) e sua **JBL Go 4** simplesmente desligar por "inatividade" enquanto está conectada ao PC? Este projeto resolve esse problema de forma elegante, eficiente e totalmente automatizada.
+Você já estava em foco total e sua **JBL Go 4** simplesmente desligou por "inatividade" enquanto conectada ao PC? Este projeto resolve isso de forma elegante, eficiente e totalmente automatizada.
 
-## 🚀 A Solução "Outside the Box"
+## 🚀 A Solução
 
-Diferente de soluções comuns que exigem tocar música em volume baixo, o **JBL Keep-Alive Sentinel** utiliza uma abordagem de engenharia de áudio:
+Diferente de soluções que exigem tocar música em volume baixo, o **JBL Keep-Alive Sentinel** usa engenharia de áudio:
 
-* **Heartbeat Inaudível**: Gera uma onda senoidal de **20Hz** (limite inferior da audição humana) com ganho mínimo.
-* **Arquitetura Reativa**: Utiliza as **Core Audio APIs** do Windows para monitorar eventos de hardware. O serviço só consome recursos quando a JBL está realmente ativa.
-* **Zero Polling**: Esqueça loops infinitos de verificação. O sistema é notificado pelo SO no milissegundo em que a conexão ocorre.
+- **Heartbeat Inaudível**: Gera uma onda senoidal de **20Hz** (limite inferior da audição humana) com ganho mínimo de `0.005` — imperceptível ao ouvido, suficiente para manter o dispositivo ativo.
+- **Arquitetura Reativa**: Usa as **Core Audio APIs** do Windows via `IMMNotificationClient`. O serviço é notificado pelo SO no momento exato em que o dispositivo conecta ou desconecta.
+- **Fallback Periódico**: Um loop de 5 segundos garante detecção mesmo quando o Windows não dispara o evento de hardware.
+- **Reconexão Automática**: Detecta e reinicia o heartbeat automaticamente após desligar e religar o dispositivo.
 
 ## ✨ Funcionalidades
 
-* **System Tray Integration**: Ícone dinâmico na bandeja do sistema para feedback visual instantâneo.
-* **Notificações Nativas**: Balloon Tips avisam quando a proteção de conexão foi ativada.
-* **Auto-Contido**: Publicado como um único executável de arquivo único (Single-file EXE).
-* **PNG-to-Icon Engine**: Carregamento dinâmico de ícones com transparência a partir de recursos embutidos.
+- **System Tray**: Ícone dinâmico na bandeja do sistema com feedback visual instantâneo (conectado/desconectado).
+- **Notificações Nativas**: Balloon tip ao conectar o dispositivo.
+- **Instância Única**: Proteção via Mutex — rodar o executável duas vezes não cria dois heartbeats.
+- **Totalmente Configurável**: Nome do dispositivo, mensagens da UI e comportamento definidos via `appsettings.json`.
+- **Compatível com qualquer modelo**: Não é exclusivo para JBL Go 4 — funciona com qualquer dispositivo de áudio Bluetooth.
+- **Single-file EXE**: Publicado como executável auto-contido, sem dependências externas.
 
 ## 🛠 Tech Stack
 
-* **.NET 10.0** (C#)
-* **NAudio**: Manipulação de áudio de baixo nível e Core Audio API.
-* **Windows Forms**: Interface leve para System Tray.
-* **Microsoft.Extensions.Hosting**: Gerenciamento de ciclo de vida do Worker Service.
+- **.NET 10.0** (C#)
+- **NAudio 2.2.1**: Enumeração de dispositivos, Core Audio API e geração de sinal.
+- **Windows Forms**: Interface leve para System Tray.
+- **Microsoft.Extensions.Hosting**: Ciclo de vida do Worker Service e injeção de dependência.
 
-## 📦 Instalação Prática
+## ⚙️ Configuração
 
-Para implantar o sentinela na sua workstation:
+Todas as configurações ficam em `appsettings.json`:
 
-1. **Clone o repositório:**
+```json
+{
+  "JblDevice": {
+    "NameFilter": "JBL Go 4",
+    "DisplayName": "JBL Go 4"
+  },
+  "UI": {
+    "AppName": "JBL Sentinel",
+    "ConnectedMessage": "{0}: Ativa e Protegida",
+    "DisconnectedMessage": "{0}: Não detectada",
+    "BalloonTipTitle": "{0}",
+    "BalloonTipMessage": "Caixa conectada. O heartbeat de áudio está ativo."
+  }
+}
+```
+
+Para usar com outro dispositivo, basta alterar `NameFilter` com parte do nome que aparece em **Configurações → Som → Dispositivos de saída**:
+
+```json
+"JblDevice": {
+  "NameFilter": "Sony WH-1000XM5",
+  "DisplayName": "Meu Fone Sony"
+}
+```
+
+## 📦 Instalação
+
+### Opção 1 — Script automático (recomendado)
+
+Execute o `install.ps1` no PowerShell. Ele publica o binário, instala em `%LocalAppData%\JblKeepAlive` e cria um atalho na pasta Startup do Windows para iniciar com o sistema:
+
+```powershell
+.\install.ps1
+```
+
+### Opção 2 — Manual
+
+1. Clone o repositório:
 ```bash
 git clone https://github.com/heliopereira/JblKeepAlive.git
-
 ```
 
-
-2. **Publique o binário:**
+2. Publique o binário:
 ```bash
 dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o ./publish
-
 ```
 
+3. Copie o executável para onde preferir e adicione ao Startup do Windows manualmente.
 
-3. **Execute o Instalador:**
-Rode o script `install.ps1` (ou o `deploy.bat`) como Administrador para registrar o atalho na inicialização do Windows.
+## 🧠 Como Funciona
 
-## 🧠 Como Funciona? (Deep Dive)
+O núcleo é o `Worker`, um `BackgroundService` que orquestra dois mecanismos:
 
-O coração do sistema é o `IMMNotificationClient`. Em vez de perguntar ao Windows a cada segundo "A JBL está aí?", nós registramos um callback:
+**1. Notificações reativas (IMMNotificationClient)**
 
 ```csharp
-// Exemplo da nossa abordagem reativa
-public void OnDeviceStateChanged(string deviceId, DeviceState newState) {
-    if (deviceId.Contains("JBL") && newState == DeviceState.Active) {
-        StartHeartbeat(); // Inicia o sinal de 20Hz imediatamente
-    }
-}
-
+// AudioNotificationClient.cs
+public void OnDeviceStateChanged(string deviceId, DeviceState newState)
+    => _onChanged.Invoke(); // dispara UpdateHeartbeatState imediatamente
 ```
 
-Isso garante que sua **JBL Go 4** nunca entre em modo de economia de energia enquanto você estiver logado, economizando processamento do seu PC e preservando a vida útil do hardware.
+**2. Máquina de estados no UpdateHeartbeatState**
+
+| Estado do dispositivo | Heartbeat | Ação |
+|---|---|---|
+| `Active` + heartbeat não tocando | qualquer | Para o anterior, inicia novo |
+| `Active` + heartbeat tocando | Playing | Mantém, atualiza status |
+| `Unplugged` + playback parou | Stopped | Para heartbeat imediatamente |
+| `Unplugged` + playback ativo | Playing | Aguarda grace period de 10s |
+| `NotPresent` / `Disabled` / `null` | qualquer | Para heartbeat |
+
+**3. Proteção contra deadlock**
+
+O `OnPlaybackStopped` do NAudio dispara em uma thread interna. Para evitar deadlock com o `lock` do loop principal, ele não adquire o lock — apenas limpa o `_waveOut` e sinaliza `IsConnected = false`. O próximo ciclo do loop detecta e reage.
+
+## 🗂 Estrutura do Projeto
+
+```
+JblKeepAlive/
+├── Program.cs                  # Bootstrap: host, DI, mutex de instância única, tray
+├── Worker.cs                   # Núcleo: monitora dispositivos, gerencia heartbeat
+├── AudioNotificationClient.cs  # Callback de eventos de hardware do Windows
+├── JblStatusService.cs         # Singleton de estado compartilhado entre Worker e UI
+├── TrayApplicationContext.cs   # UI da bandeja: ícone, tooltip, balloon tip, menu
+├── AppSettings.cs              # Classes de configuração tipadas
+├── appsettings.json            # Configuração padrão
+└── install.ps1                 # Script de instalação e registro no Startup
+```
 
 ---
 
 ## 👨‍💻 Autor
 
-**Hélio Pereira** Desenvolvedor Fullstack .NET com foco em IA, IoT e infraestrutura Linux. Apaixonado por criar sistemas robustos que resolvem problemas reais do cotidiano tecnológico.
+**Hélio Pereira** — Desenvolvedor Fullstack .NET com foco em IA, IoT e infraestrutura Linux.
 
-* **GitHub**: [heliopereira](https://github.com/heliopereira)
-* **LinkedIn**: [Hélio Pereira](https://www.google.com/search?q=https://www.linkedin.com/in/heliopereira/)
-
----
-
-*Este projeto foi desenvolvido com uma visão prática e orientada a resultados, explorando todo o potencial do ecossistema .NET.*
+- **GitHub**: [heliopereira](https://github.com/heliopereira)
+- **LinkedIn**: [Hélio Pereira](https://www.linkedin.com/in/heliopereira/)
